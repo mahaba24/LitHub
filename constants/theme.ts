@@ -8,6 +8,12 @@ import { Platform } from 'react-native';
 const tintColorLight = '#0a7ea4';
 const tintColorDark = '#fff';
 
+// tint flips to white in dark mode (right for icons/text against a dark
+// background), which makes it unusable as a solid button fill — the white
+// label text on top would be invisible. Buttons use this fixed accent
+// instead, in both themes.
+export const ACCENT_COLOR = '#0a7ea4';
+
 export const Colors = {
   light: {
     text: '#11181C',

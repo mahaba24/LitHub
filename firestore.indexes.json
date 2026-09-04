@@ -1,0 +1,14 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "requests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "bookId", "order": "ASCENDING" },
+        { "fieldPath": "borrowerId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

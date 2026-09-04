@@ -1,0 +1,79 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId} {
+      allow read: if request.auth != null;
+      // trustScore/completedReturns/reviewCount/averageRating are maintained
+      // only by the recalculateTrustScore Cloud Function (Admin SDK, bypasses
+      // these rules) — clients may create them at zero and never touch them
+      // again.
+      allow create: if request.auth != null && request.auth.uid == userId
+        && request.resource.data.trustScore == 0
+        && request.resource.data.completedReturns == 0
+        && request.resource.data.reviewCount == 0
+        && request.resource.data.averageRating == 0;
+      allow update: if request.auth != null && request.auth.uid == userId
+        && !request.resource.data.diff(resource.data).affectedKeys()
+          .hasAny(['trustScore', 'completedReturns', 'reviewCount', 'averageRating']);
+      allow delete: if false;
+    }
+
+    match /books/{bookId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.ownerId == request.auth.uid;
+      allow update, delete: if request.auth != null
+        && resource.data.ownerId == request.auth.uid;
+    }
+
+    match /requests/{requestId} {
+      allow read: if request.auth != null
+        && request.auth.uid in [resource.data.borrowerId, resource.data.lenderId];
+      allow create: if request.auth != null
+        && request.resource.data.borrowerId == request.auth.uid
+        && request.resource.data.lenderId != request.auth.uid
+        && request.resource.data.status == 'Requested';
+      // Only the two parties can update, and only the mutable fields
+      // (status/proposedDueDate/updatedAt) — the participants and book are
+      // fixed at creation.
+      allow update: if request.auth != null
+        && request.auth.uid in [resource.data.borrowerId, resource.data.lenderId]
+        && request.resource.data.borrowerId == resource.data.borrowerId
+        && request.resource.data.lenderId == resource.data.lenderId
+        && request.resource.data.bookId == resource.data.bookId;
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        function isParty() {
+          return request.auth.uid in [
+            get(/databases/$(database)/documents/requests/$(requestId)).data.borrowerId,
+            get(/databases/$(database)/documents/requests/$(requestId)).data.lenderId
+          ];
+        }
+        allow read: if request.auth != null && isParty();
+        allow create: if request.auth != null && isParty()
+          && request.resource.data.senderId == request.auth.uid;
+        allow update, delete: if false;
+      }
+    }
+
+    match /reviews/{reviewId} {
+      // Reviews feed directly into trustScore, so creation is validated
+      // against the referenced request: the reviewer and reviewee must be
+      // its two actual parties, and the exchange must really be Completed —
+      // otherwise anyone could review any pair of users to inflate scores.
+      function reviewedRequest() {
+        return get(/databases/$(database)/documents/requests/$(request.resource.data.requestId)).data;
+      }
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.reviewerId == request.auth.uid
+        && request.resource.data.revieweeId != request.auth.uid
+        && reviewedRequest().status == 'Completed'
+        && request.auth.uid in [reviewedRequest().borrowerId, reviewedRequest().lenderId]
+        && request.resource.data.revieweeId in [reviewedRequest().borrowerId, reviewedRequest().lenderId];
+      allow update, delete: if false;
+    }
+  }
+}

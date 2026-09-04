@@ -1,37 +1,37 @@
 import { Image } from 'expo-image';
 import { Link, router } from 'expo-router';
-import { useMemo } from 'react';
-import { FlatList, Pressable, StyleSheet } from 'react-native';
+import { Alert, FlatList, Platform, Pressable, StyleSheet } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { useAuth } from '@/contexts/auth-context';
-import { useBooks } from '@/hooks/use-books';
-import { formatDistanceMiles, haversineDistanceMiles } from '@/lib/geo';
+import { useBookMutations } from '@/hooks/use-book-mutations';
+import { useMyBooks } from '@/hooks/use-my-books';
 import type { Book } from '@/types/book';
 
-export default function HomeScreen() {
-  const { books, loading } = useBooks();
-  const { user, profile } = useAuth();
+export default function MyBooksScreen() {
+  const { books, loading } = useMyBooks();
+  const { deleteBook } = useBookMutations();
 
-  const availableBooks = useMemo(
-    () => books.filter((book) => book.ownerId !== user?.uid && book.available),
-    [books, user]
-  );
-
-  const distanceFor = (book: Book) =>
-    profile?.location && book.location
-      ? haversineDistanceMiles(profile.location, book.location)
-      : undefined;
+  const confirmDelete = (book: Book) => {
+    const performDelete = () => deleteBook(book.id);
+    if (Platform.OS === 'web') {
+      if (window.confirm(`Delete "${book.title}"? This can't be undone.`)) performDelete();
+      return;
+    }
+    Alert.alert('Delete book', `Delete "${book.title}"? This can't be undone.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: performDelete },
+    ]);
+  };
 
   return (
     <FlatList
       contentContainerStyle={styles.content}
-      data={availableBooks}
+      data={books}
       keyExtractor={(item) => item.id}
       ListHeaderComponent={
         <ThemedView style={styles.header}>
-          <ThemedText type="title">Available Books</ThemedText>
+          <ThemedText type="title">My Books</ThemedText>
           <Pressable style={styles.addButton} onPress={() => router.push('/add-book')}>
             <ThemedText type="link">+ Add a Book</ThemedText>
           </Pressable>
@@ -40,15 +40,14 @@ export default function HomeScreen() {
       ListEmptyComponent={
         !loading ? (
           <ThemedView style={styles.empty}>
-            <ThemedText>No books listed yet. Be the first to add one!</ThemedText>
+            <ThemedText>You haven&apos;t listed any books yet.</ThemedText>
           </ThemedView>
         ) : null
       }
-      renderItem={({ item }) => {
-        const distance = distanceFor(item);
-        return (
+      renderItem={({ item }) => (
+        <ThemedView style={styles.row}>
           <Link href={`/book/${item.id}`} asChild>
-            <Pressable style={styles.row}>
+            <Pressable style={styles.rowMain}>
               {item.coverUrl ? (
                 <Image source={{ uri: item.coverUrl }} style={styles.cover} contentFit="cover" />
               ) : (
@@ -57,15 +56,22 @@ export default function HomeScreen() {
               <ThemedView style={styles.info}>
                 <ThemedText type="defaultSemiBold">{item.title}</ThemedText>
                 <ThemedText>{item.author}</ThemedText>
-                <ThemedText style={styles.meta}>
-                  {item.genre}
-                  {distance !== undefined ? ` · ${formatDistanceMiles(distance)}` : ''}
+                <ThemedText style={styles.status}>
+                  {item.available ? 'Available' : 'Unavailable'}
                 </ThemedText>
               </ThemedView>
             </Pressable>
           </Link>
-        );
-      }}
+          <ThemedView style={styles.actions}>
+            <Pressable onPress={() => router.push(`/edit-book/${item.id}`)}>
+              <ThemedText type="link">Edit</ThemedText>
+            </Pressable>
+            <Pressable onPress={() => confirmDelete(item)}>
+              <ThemedText style={styles.deleteText}>Delete</ThemedText>
+            </Pressable>
+          </ThemedView>
+        </ThemedView>
+      )}
     />
   );
 }
@@ -86,10 +92,13 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   row: {
-    flexDirection: 'row',
-    gap: 12,
     paddingHorizontal: 20,
     paddingVertical: 10,
+    gap: 8,
+  },
+  rowMain: {
+    flexDirection: 'row',
+    gap: 12,
     alignItems: 'center',
   },
   cover: {
@@ -108,7 +117,15 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 2,
   },
-  meta: {
+  status: {
     opacity: 0.7,
+  },
+  actions: {
+    flexDirection: 'row',
+    gap: 20,
+    paddingLeft: 60,
+  },
+  deleteText: {
+    color: '#c0392b',
   },
 });
