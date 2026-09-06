@@ -1,10 +1,10 @@
 import { getApp, getApps, initializeApp, type FirebaseApp } from 'firebase/app';
-import { getAuth, initializeAuth, type Auth } from 'firebase/auth';
+import { initializeAuth, getAuth, type Auth } from 'firebase/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 // firebase/auth's "types" export condition always resolves to the non-RN
 // d.ts, even though Metro bundles the real React Native build that exports
 // this function — the import is valid at runtime, tsc just can't see it.
 // @ts-expect-error — getReactNativePersistence exists in the RN build's types, not the resolved d.ts
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getReactNativePersistence } from 'firebase/auth';
 import { getFirestore, type Firestore } from 'firebase/firestore';
 import { Platform } from 'react-native';
