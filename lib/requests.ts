@@ -13,6 +13,9 @@ export function requestFromDoc(id: string, data: DocumentData): BorrowRequest {
     lenderName: data.lenderName,
     status: data.status,
     proposedDueDate: data.proposedDueDate ?? null,
+    damageSeverity: data.damageSeverity ?? 'None',
+    damageFee: data.damageFee ?? null,
+    damageReportedAt: data.damageReportedAt?.toMillis?.() ?? null,
     createdAt: data.createdAt?.toMillis?.() ?? Date.now(),
     updatedAt: data.updatedAt?.toMillis?.() ?? Date.now(),
   };

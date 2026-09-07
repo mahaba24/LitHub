@@ -16,7 +16,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { requireDb } from '@/lib/firebase';
 import { requestFromDoc } from '@/lib/requests';
 import type { Book } from '@/types/book';
-import type { BorrowRequest } from '@/types/request';
+import { DAMAGE_FEES, type BorrowRequest, type DamageSeverity } from '@/types/request';
 
 export function useRequest(id: string | undefined) {
   const [request, setRequest] = useState<BorrowRequest | null>(null);
@@ -68,6 +68,53 @@ export function useMyRequestForBook(bookId: string | undefined) {
   return { request, loading };
 }
 
+/** Every request the current user is part of, either as borrower or lender. */
+export function useMyRequests() {
+  const { user } = useAuth();
+  const [asBorrower, setAsBorrower] = useState<BorrowRequest[]>([]);
+  const [asLender, setAsLender] = useState<BorrowRequest[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!user) {
+      setAsBorrower([]);
+      setAsLender([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+
+    let borrowerReady = false;
+    let lenderReady = false;
+    const checkDone = () => {
+      if (borrowerReady && lenderReady) setLoading(false);
+    };
+
+    const borrowerQuery = query(collection(requireDb(), 'requests'), where('borrowerId', '==', user.uid));
+    const lenderQuery = query(collection(requireDb(), 'requests'), where('lenderId', '==', user.uid));
+
+    const unsubBorrower = onSnapshot(borrowerQuery, (snapshot) => {
+      setAsBorrower(snapshot.docs.map((d) => requestFromDoc(d.id, d.data())));
+      borrowerReady = true;
+      checkDone();
+    });
+    const unsubLender = onSnapshot(lenderQuery, (snapshot) => {
+      setAsLender(snapshot.docs.map((d) => requestFromDoc(d.id, d.data())));
+      lenderReady = true;
+      checkDone();
+    });
+
+    return () => {
+      unsubBorrower();
+      unsubLender();
+    };
+  }, [user]);
+
+  const requests = [...asBorrower, ...asLender].sort((a, b) => b.updatedAt - a.updatedAt);
+
+  return { requests, loading };
+}
+
 export function useRequestActions() {
   const { user, profile } = useAuth();
   const [status, setStatus] = useState<'idle' | 'submitting' | 'error'>('idle');
@@ -86,6 +133,9 @@ export function useRequestActions() {
           lenderName: book.ownerName,
           status: 'Requested',
           proposedDueDate: null,
+          damageSeverity: 'None',
+          damageFee: null,
+          damageReportedAt: null,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
@@ -136,5 +186,24 @@ export function useRequestActions() {
     [setRequestFields]
   );
 
-  return { status, createRequest, proposeDueDate, counterProposal, acceptProposal, markReturned };
+  const reportDamage = useCallback(
+    (requestId: string, severity: Exclude<DamageSeverity, 'None'>) =>
+      setRequestFields(requestId, {
+        status: 'Completed',
+        damageSeverity: severity,
+        damageFee: DAMAGE_FEES[severity],
+        damageReportedAt: serverTimestamp(),
+      }),
+    [setRequestFields]
+  );
+
+  return {
+    status,
+    createRequest,
+    proposeDueDate,
+    counterProposal,
+    acceptProposal,
+    markReturned,
+    reportDamage,
+  };
 }
