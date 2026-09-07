@@ -24,6 +24,7 @@ function RootNavigator() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="book/[id]" options={{ headerBackTitle: 'Back' }} />
         <Stack.Screen name="request/[id]" options={{ headerBackTitle: 'Back' }} />
+        <Stack.Screen name="requests" options={{ headerBackTitle: 'Back' }} />
         <Stack.Screen name="add-book" options={{ presentation: 'modal' }} />
         <Stack.Screen name="edit-book/[id]" options={{ presentation: 'modal' }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />

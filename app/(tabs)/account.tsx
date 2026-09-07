@@ -1,3 +1,4 @@
+import { Link } from 'expo-router';
 import { Pressable, StyleSheet } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -19,6 +20,9 @@ export default function AccountScreen() {
   return (
     <ThemedView style={styles.container}>
       <ThemedText type="title">Account</ThemedText>
+      <Link href="/requests" style={styles.requestsLink}>
+        <ThemedText type="link">My Requests →</ThemedText>
+      </Link>
 
       <ThemedView style={styles.section}>
         <ThemedText type="defaultSemiBold">{profile?.displayName ?? 'Loading…'}</ThemedText>
@@ -65,6 +69,9 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 20,
     gap: 24,
+  },
+  requestsLink: {
+    marginTop: -8,
   },
   section: {
     gap: 6,
