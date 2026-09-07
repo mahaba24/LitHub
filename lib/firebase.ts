@@ -1,6 +1,6 @@
-import { getApp, getApps, initializeApp, type FirebaseApp } from 'firebase/app';
-import { initializeAuth, getAuth, type Auth } from 'firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getApp, getApps, initializeApp, type FirebaseApp } from 'firebase/app';
+import { getAuth, initializeAuth, type Auth } from 'firebase/auth';
 // firebase/auth's "types" export condition always resolves to the non-RN
 // d.ts, even though Metro bundles the real React Native build that exports
 // this function — the import is valid at runtime, tsc just can't see it.
@@ -20,13 +20,34 @@ const firebaseConfig = {
 
 const app: FirebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
-const auth: Auth =
-  Platform.OS === "web"
-    ? getAuth(app)
-    : initializeAuth(app, {
+let auth: Auth;
+if (Platform.OS === "web") {
+  auth = getAuth(app);
+} else {
+  try {
+    auth = initializeAuth(app, {
       persistence: getReactNativePersistence(AsyncStorage),
     });
+  } catch {
+    // Already initialized (common during Fast Refresh) — just grab the existing instance
+    auth = getAuth(app);
+  }
+}
 
 const db: Firestore = getFirestore(app);
 
 export { app, auth, db };
+
+export function requireDb(): Firestore {
+  if (!db) {
+    throw new Error('Firestore has not been initialized yet.');
+  }
+  return db;
+}
+
+export function requireAuth(): Auth {
+  if (!auth) {
+    throw new Error('Firebase Auth has not been initialized yet.');
+  }
+  return auth;
+}
