@@ -18,7 +18,9 @@ const firebaseConfig = {
   appId: "1:572558552840:web:262d1f45ff912cdb3886bd"
 };
 
-const app: FirebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
+export const isFirebaseConfigured = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
+
+const app: FirebaseApp =getApps().length ? getApp() : initializeApp(firebaseConfig);
 
 let auth: Auth;
 if (Platform.OS === "web") {
