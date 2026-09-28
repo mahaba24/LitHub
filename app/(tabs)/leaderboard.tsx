@@ -1,114 +1,119 @@
-import { Image } from 'expo-image';
-import { Link } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet } from 'react-native';
+import { router } from 'expo-router';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Avatar } from '@/components/avatar';
+import { BookCover } from '@/components/book-card';
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
+import { Card, CardSeparator } from '@/components/ui/card';
+import { IconSymbol } from '@/components/ui/icon-symbol';
+import { ScreenTitle } from '@/components/ui/screen-title';
+import { useAuth } from '@/contexts/auth-context';
 import { useBookOfTheMonth, useTopReaders } from '@/hooks/use-leaderboard';
+import { useThemeColor } from '@/hooks/use-theme-color';
 
-const RANK_MEDALS = ['🥇', '🥈', '🥉'];
+const RANK_COLORS = ['#E5A50A', '#9CA3AF', '#B8733D'];
+
+function RankBadge({ rank }: { rank: number }) {
+  const muted = useThemeColor({}, 'mutedText');
+  const color = RANK_COLORS[rank - 1];
+  return color ? (
+    <View style={[styles.rankBadge, { backgroundColor: color }]}>
+      <ThemedText style={styles.rankBadgeText}>{rank}</ThemedText>
+    </View>
+  ) : (
+    <ThemedText style={[styles.rankPlain, { color: muted }]}>{rank}</ThemedText>
+  );
+}
 
 export default function LeaderboardScreen() {
+  const { user } = useAuth();
   const { readers, loading: readersLoading } = useTopReaders();
   const { entries, loading: booksLoading } = useBookOfTheMonth();
+  const insets = useSafeAreaInsets();
+  const background = useThemeColor({}, 'groupedBackground');
+  const muted = useThemeColor({}, 'mutedText');
+  const tint = useThemeColor({}, 'tint');
 
   return (
-    <ScrollView contentContainerStyle={styles.content}>
-      <ThemedView style={styles.header}>
-        <ThemedText type="title">Leaderboard</ThemedText>
-      </ThemedView>
+    <ScrollView
+      style={{ backgroundColor: background }}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}>
+      <ScreenTitle title="Leaderboard" subtitle="The community’s most trusted readers" />
 
-      <ThemedView style={styles.section}>
-        <ThemedText type="subtitle">Top Readers</ThemedText>
+      <Card title="Top readers">
         {!readersLoading && readers.length === 0 && (
-          <ThemedText style={styles.empty}>No readers yet — complete an exchange to get ranked.</ThemedText>
+          <ThemedText style={[styles.empty, { color: muted }]}>
+            No readers yet — complete an exchange to get ranked.
+          </ThemedText>
         )}
         {readers.map((reader, index) => (
-          <ThemedView key={reader.uid} style={styles.row}>
-            <ThemedText style={styles.rank}>{RANK_MEDALS[index] ?? `#${index + 1}`}</ThemedText>
-            <ThemedView style={styles.info}>
-              <ThemedText type="defaultSemiBold">{reader.displayName}</ThemedText>
-              <ThemedText style={styles.meta}>
-                {reader.completedReturns} returns · {reader.reviewCount} reviews
-              </ThemedText>
-            </ThemedView>
-            <ThemedText type="defaultSemiBold">{Math.round(reader.trustScore)}</ThemedText>
-          </ThemedView>
+          <View key={reader.uid}>
+            {index > 0 && <CardSeparator inset={100} />}
+            <Pressable
+              onPress={() => router.push(reader.uid === user?.uid ? '/account' : `/user/${reader.uid}`)}
+              style={({ pressed }) => [styles.row, pressed && styles.pressed]}>
+              <RankBadge rank={index + 1} />
+              <Avatar name={reader.displayName} uid={reader.uid} size={40} />
+              <View style={styles.info}>
+                <ThemedText style={styles.name} numberOfLines={1}>
+                  {reader.displayName}
+                  {reader.uid === user?.uid ? ' (you)' : ''}
+                </ThemedText>
+                <ThemedText style={[styles.meta, { color: muted }]}>
+                  {reader.completedReturns} returns · {reader.reviewCount} reviews
+                </ThemedText>
+              </View>
+              <View style={styles.score}>
+                <ThemedText style={[styles.scoreValue, { color: tint }]}>{Math.round(reader.trustScore)}</ThemedText>
+                <ThemedText style={[styles.scoreLabel, { color: muted }]}>TRUST</ThemedText>
+              </View>
+            </Pressable>
+          </View>
         ))}
-      </ThemedView>
+      </Card>
 
-      <ThemedView style={styles.section}>
-        <ThemedText type="subtitle">Book of the Month</ThemedText>
+      <Card title="Book of the month">
         {!booksLoading && entries.length === 0 && (
-          <ThemedText style={styles.empty}>No requests yet this month.</ThemedText>
+          <ThemedText style={[styles.empty, { color: muted }]}>No requests yet this month.</ThemedText>
         )}
         {entries.map(({ book, requestCount }, index) => (
-          <Link key={book.id} href={`/book/${book.id}`} asChild>
-            <Pressable style={styles.row}>
-              <ThemedText style={styles.rank}>{RANK_MEDALS[index] ?? `#${index + 1}`}</ThemedText>
-              {book.coverUrl ? (
-                <Image source={{ uri: book.coverUrl }} style={styles.cover} contentFit="cover" />
-              ) : (
-                <ThemedView style={styles.coverPlaceholder} />
-              )}
-              <ThemedView style={styles.info}>
-                <ThemedText type="defaultSemiBold">{book.title}</ThemedText>
-                <ThemedText style={styles.meta}>
+          <View key={book.id}>
+            {index > 0 && <CardSeparator inset={100} />}
+            <Pressable
+              onPress={() => router.push(`/book/${book.id}`)}
+              style={({ pressed }) => [styles.row, pressed && styles.pressed]}>
+              <RankBadge rank={index + 1} />
+              <BookCover uri={book.coverUrl} width={40} />
+              <View style={styles.info}>
+                <ThemedText style={styles.name} numberOfLines={2}>
+                  {book.title}
+                </ThemedText>
+                <ThemedText style={[styles.meta, { color: muted }]} numberOfLines={1}>
                   {book.author} · {requestCount} request{requestCount === 1 ? '' : 's'}
                 </ThemedText>
-              </ThemedView>
+              </View>
+              <IconSymbol name="chevron.right" size={14} color={muted} />
             </Pressable>
-          </Link>
+          </View>
         ))}
-      </ThemedView>
+      </Card>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  content: {
-    flexGrow: 1,
-  },
-  header: {
-    padding: 20,
-    paddingBottom: 8,
-  },
-  section: {
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    gap: 8,
-  },
-  empty: {
-    opacity: 0.7,
-  },
-  row: {
-    flexDirection: 'row',
-    gap: 12,
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  rank: {
-    width: 32,
-    fontSize: 16,
-    textAlign: 'center',
-  },
-  info: {
-    flex: 1,
-    gap: 2,
-  },
-  meta: {
-    opacity: 0.7,
-  },
-  cover: {
-    width: 40,
-    height: 60,
-    borderRadius: 4,
-  },
-  coverPlaceholder: {
-    width: 40,
-    height: 60,
-    borderRadius: 4,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#687076',
-  },
+  content: { paddingHorizontal: 16, paddingBottom: 32, gap: 28 },
+  empty: { padding: 16 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 12 },
+  pressed: { opacity: 0.6 },
+  rankBadge: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  rankBadgeText: { color: '#fff', fontSize: 13, lineHeight: 16, fontWeight: '800' },
+  rankPlain: { width: 26, textAlign: 'center', fontSize: 15, fontWeight: '700' },
+  info: { flex: 1, gap: 2 },
+  name: { fontSize: 16, lineHeight: 21, fontWeight: '600' },
+  meta: { fontSize: 13, lineHeight: 17 },
+  score: { alignItems: 'center', minWidth: 44 },
+  scoreValue: { fontSize: 20, lineHeight: 24, fontWeight: '800' },
+  scoreLabel: { fontSize: 10, lineHeight: 12, fontWeight: '700', letterSpacing: 0.8 },
 });

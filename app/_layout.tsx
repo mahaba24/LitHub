@@ -25,6 +25,11 @@ function RootNavigator() {
         <Stack.Screen name="book/[id]" options={{ headerBackTitle: 'Back' }} />
         <Stack.Screen name="request/[id]" options={{ headerBackTitle: 'Back' }} />
         <Stack.Screen name="requests" options={{ headerBackTitle: 'Back' }} />
+        <Stack.Screen name="chats" options={{ headerBackTitle: 'Back' }} />
+        <Stack.Screen name="chat/[id]" options={{ headerBackTitle: 'Back' }} />
+        <Stack.Screen name="review/[id]" options={{ headerBackTitle: 'Back' }} />
+        <Stack.Screen name="user/[id]" options={{ headerBackTitle: 'Back' }} />
+        <Stack.Screen name="connections/[id]" options={{ headerBackTitle: 'Back' }} />
         <Stack.Screen name="add-book" options={{ presentation: 'modal' }} />
         <Stack.Screen name="edit-book/[id]" options={{ presentation: 'modal' }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />

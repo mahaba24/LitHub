@@ -3,24 +3,10 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { requireDb } from '@/lib/firebase';
 import { requestFromDoc } from '@/lib/requests';
+import { userProfileFromDoc } from '@/lib/users';
 import { useBooks } from '@/hooks/use-books';
 import type { Book } from '@/types/book';
 import type { UserProfile } from '@/types/user';
-
-function userProfileFromDoc(data: Record<string, unknown>): UserProfile {
-  const createdAt = data.createdAt as { toMillis?: () => number } | undefined;
-  return {
-    uid: data.uid as string,
-    email: data.email as string,
-    displayName: data.displayName as string,
-    location: (data.location as UserProfile['location']) ?? null,
-    createdAt: createdAt?.toMillis?.() ?? Date.now(),
-    trustScore: (data.trustScore as number) ?? 0,
-    completedReturns: (data.completedReturns as number) ?? 0,
-    reviewCount: (data.reviewCount as number) ?? 0,
-    averageRating: (data.averageRating as number) ?? 0,
-  };
-}
 
 export function useTopReaders(limitCount = 10) {
   const [readers, setReaders] = useState<UserProfile[]>([]);

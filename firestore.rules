@@ -28,8 +28,12 @@ service cloud.firestore {
     }
 
     match /requests/{requestId} {
+      // Written as an OR of equality checks (not `uid in [borrowerId, lenderId]`)
+      // so list queries filtered on borrowerId/lenderId can be proven safe —
+      // the `in [...]` form only works for single-doc gets and denies every query.
       allow read: if request.auth != null
-        && request.auth.uid in [resource.data.borrowerId, resource.data.lenderId];
+        && (resource.data.borrowerId == request.auth.uid
+          || resource.data.lenderId == request.auth.uid);
       allow create: if request.auth != null
         && request.resource.data.borrowerId == request.auth.uid
         && request.resource.data.lenderId != request.auth.uid
@@ -41,7 +45,14 @@ service cloud.firestore {
         && request.auth.uid in [resource.data.borrowerId, resource.data.lenderId]
         && request.resource.data.borrowerId == resource.data.borrowerId
         && request.resource.data.lenderId == resource.data.lenderId
-        && request.resource.data.bookId == resource.data.bookId;
+        && request.resource.data.bookId == resource.data.bookId
+        // Any proposal/counter must be stamped with the caller as proposer…
+        && (request.resource.data.status != 'Under Negotiation'
+          || request.resource.data.lastProposedBy == request.auth.uid)
+        // …and only the other party may accept it.
+        && !(resource.data.status == 'Under Negotiation'
+          && request.resource.data.status == 'Confirmed'
+          && resource.data.get('lastProposedBy', null) == request.auth.uid);
       allow delete: if false;
 
       match /messages/{messageId} {
@@ -72,8 +83,30 @@ service cloud.firestore {
         && request.resource.data.revieweeId != request.auth.uid
         && reviewedRequest().status == 'Completed'
         && request.auth.uid in [reviewedRequest().borrowerId, reviewedRequest().lenderId]
-        && request.resource.data.revieweeId in [reviewedRequest().borrowerId, reviewedRequest().lenderId];
+        && request.resource.data.revieweeId in [reviewedRequest().borrowerId, reviewedRequest().lenderId]
+        // The reviewee's role must match who they actually were in the request,
+        // so borrower/lender ratings can't be misattributed.
+        && request.resource.data.revieweeRole == (
+          request.resource.data.revieweeId == reviewedRequest().borrowerId ? 'borrower' : 'lender');
       allow update, delete: if false;
+    }
+
+    match /follows/{followId} {
+      // Doc id is `{followerId}_{followeeId}`, so each pair can exist only once.
+      allow read: if request.auth != null;
+      // Only the follower can create their own follow record.
+      allow create: if request.auth != null
+        && request.resource.data.followerId == request.auth.uid
+        && request.resource.data.followeeId is string
+        && request.resource.data.followeeId != request.auth.uid
+        && followId == request.auth.uid + '_' + request.resource.data.followeeId
+        && request.resource.data.keys().hasOnly(
+          ['followerId', 'followerName', 'followeeId', 'followeeName', 'createdAt'])
+        && request.resource.data.createdAt == request.time
+        && exists(/databases/$(database)/documents/users/$(request.resource.data.followeeId));
+      allow update: if false;
+      // …and only the follower can remove it (unfollow).
+      allow delete: if request.auth != null && resource.data.followerId == request.auth.uid;
     }
   }
 }

@@ -7,15 +7,21 @@ import {
   type User,
 } from 'firebase/auth';
 import { doc, onSnapshot, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import { auth, db, isFirebaseConfigured } from '@/lib/firebase';
+import { userProfileFromDoc } from '@/lib/users';
 import type { GeoPoint } from '@/types/geo';
 import type { UserProfile } from '@/types/user';
+
+/** Why `profile` is null (or not): lets screens show something better than a permanent "Loading…". */
+export type ProfileStatus = 'loading' | 'ready' | 'creating' | 'error';
 
 type AuthContextValue = {
   user: User | null;
   profile: UserProfile | null;
+  profileStatus: ProfileStatus;
+  profileError: string | null;
   initializing: boolean;
   signUp: (email: string, password: string, displayName: string) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
@@ -33,6 +39,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [initializing, setInitializing] = useState(isFirebaseConfigured);
+  const [profileStatus, setProfileStatus] = useState<ProfileStatus>('loading');
+  const [profileError, setProfileError] = useState<string | null>(null);
+  // signUp writes the profile doc itself (with the chosen display name); the
+  // listener must not race it by creating a fallback doc in the meantime.
+  const signingUp = useRef(false);
 
   useEffect(() => {
     if (!auth) return;
@@ -45,48 +56,86 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!user || !db) {
       setProfile(null);
+      setProfileStatus('loading');
+      setProfileError(null);
       return;
     }
-    return onSnapshot(doc(db, 'users', user.uid), (snapshot) => {
-      if (!snapshot.exists()) {
+    setProfileStatus('loading');
+    setProfileError(null);
+    const profileRef = doc(db, 'users', user.uid);
+    let createAttempted = false;
+    return onSnapshot(
+      profileRef,
+      { includeMetadataChanges: true },
+      (snapshot) => {
+        if (!snapshot.exists()) {
+          setProfile(null);
+          // A cache miss isn't proof the doc is missing — wait for the server.
+          if (snapshot.metadata.fromCache || signingUp.current) return;
+          if (createAttempted) return;
+          // Accounts whose sign-up profile write never landed have no users/{uid}
+          // doc, so the profile would stay null forever. Recreate it with the
+          // zeroed stats the rules require; the listener then picks it up.
+          createAttempted = true;
+          setProfileStatus('creating');
+          console.warn(`users/${user.uid} is missing — recreating profile doc`);
+          setDoc(profileRef, {
+            uid: user.uid,
+            email: user.email ?? '',
+            displayName: user.displayName || user.email?.split('@')[0] || 'Reader',
+            location: null,
+            createdAt: serverTimestamp(),
+            trustScore: 0,
+            completedReturns: 0,
+            reviewCount: 0,
+            averageRating: 0,
+          }).catch((error) => {
+            console.warn('Recreating profile doc failed', error);
+            setProfileStatus('error');
+            setProfileError(error instanceof Error ? error.message : String(error));
+          });
+          return;
+        }
+        setProfileStatus('ready');
+        setProfileError(null);
+        setProfile(userProfileFromDoc(snapshot.data()));
+      },
+      (error) => {
+        console.warn(`Profile listener for users/${user.uid} failed`, error);
         setProfile(null);
-        return;
+        setProfileStatus('error');
+        setProfileError(error.message);
       }
-      const data = snapshot.data();
-      setProfile({
-        uid: data.uid,
-        email: data.email,
-        displayName: data.displayName,
-        location: data.location ?? null,
-        createdAt: data.createdAt?.toMillis?.() ?? Date.now(),
-        trustScore: data.trustScore ?? 0,
-        completedReturns: data.completedReturns ?? 0,
-        reviewCount: data.reviewCount ?? 0,
-        averageRating: data.averageRating ?? 0,
-      });
-    });
+    );
   }, [user]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
       profile,
+      profileStatus,
+      profileError,
       initializing,
       signUp: async (email, password, displayName) => {
         requireFirebase();
-        const credential = await createUserWithEmailAndPassword(auth!, email, password);
-        await updateProfile(credential.user, { displayName });
-        await setDoc(doc(db!, 'users', credential.user.uid), {
-          uid: credential.user.uid,
-          email,
-          displayName,
-          location: null,
-          createdAt: serverTimestamp(),
-          trustScore: 0,
-          completedReturns: 0,
-          reviewCount: 0,
-          averageRating: 0,
-        });
+        signingUp.current = true;
+        try {
+          const credential = await createUserWithEmailAndPassword(auth!, email, password);
+          await updateProfile(credential.user, { displayName });
+          await setDoc(doc(db!, 'users', credential.user.uid), {
+            uid: credential.user.uid,
+            email,
+            displayName,
+            location: null,
+            createdAt: serverTimestamp(),
+            trustScore: 0,
+            completedReturns: 0,
+            reviewCount: 0,
+            averageRating: 0,
+          });
+        } finally {
+          signingUp.current = false;
+        }
       },
       signIn: async (email, password) => {
         requireFirebase();
@@ -102,7 +151,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await updateDoc(doc(db!, 'users', user.uid), { location });
       },
     }),
-    [user, profile, initializing]
+    [user, profile, profileStatus, profileError, initializing]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

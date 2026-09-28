@@ -22,6 +22,12 @@ export const Colors = {
     icon: '#687076',
     tabIconDefault: '#687076',
     tabIconSelected: tintColorLight,
+    // Grouped-list surfaces (iOS Settings style): screen sits on
+    // groupedBackground, content lives on raised `card`s.
+    groupedBackground: '#F2F2F7',
+    card: '#FFFFFF',
+    separator: 'rgba(60,60,67,0.18)',
+    mutedText: '#6B7280',
   },
   dark: {
     text: '#ECEDEE',
@@ -30,6 +36,10 @@ export const Colors = {
     icon: '#9BA1A6',
     tabIconDefault: '#9BA1A6',
     tabIconSelected: tintColorDark,
+    groupedBackground: '#0B0C0D',
+    card: '#1C1D1F',
+    separator: 'rgba(235,235,245,0.14)',
+    mutedText: '#9BA1A6',
   },
 };
 

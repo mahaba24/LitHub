@@ -17,7 +17,10 @@ export type BorrowRequest = {
   lenderId: string;
   lenderName: string;
   status: RequestStatus;
-  proposedDueDate: string | null;
+  /** Epoch millis (stored as a Firestore Timestamp). */
+  proposedDueDate: number | null;
+  /** uid of whoever made the current proposedDueDate; the other party is the one who responds. */
+  lastProposedBy: string | null;
   damageSeverity: DamageSeverity;
   damageFee: number | null;
   damageReportedAt: number | null;

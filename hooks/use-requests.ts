@@ -7,6 +7,7 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  Timestamp,
   updateDoc,
   where,
 } from 'firebase/firestore';
@@ -17,6 +18,11 @@ import { requireDb } from '@/lib/firebase';
 import { requestFromDoc } from '@/lib/requests';
 import type { Book } from '@/types/book';
 import { DAMAGE_FEES, type BorrowRequest, type DamageSeverity } from '@/types/request';
+
+/** Stores the picked calendar day at local midnight, whatever time the picker attached. */
+function dueDateTimestamp(date: Date) {
+  return Timestamp.fromDate(new Date(date.getFullYear(), date.getMonth(), date.getDate()));
+}
 
 export function useRequest(id: string | undefined) {
   const [request, setRequest] = useState<BorrowRequest | null>(null);
@@ -29,10 +35,18 @@ export function useRequest(id: string | undefined) {
       return;
     }
     setLoading(true);
-    return onSnapshot(doc(requireDb(), 'requests', id), (snapshot) => {
-      setRequest(snapshot.exists() ? requestFromDoc(snapshot.id, snapshot.data()) : null);
-      setLoading(false);
-    });
+    return onSnapshot(
+      doc(requireDb(), 'requests', id),
+      (snapshot) => {
+        setRequest(snapshot.exists() ? requestFromDoc(snapshot.id, snapshot.data()) : null);
+        setLoading(false);
+      },
+      (error) => {
+        console.warn('useRequest listener failed', error);
+        setRequest(null);
+        setLoading(false);
+      }
+    );
   }, [id]);
 
   return { request, loading };
@@ -58,11 +72,18 @@ export function useMyRequestForBook(bookId: string | undefined) {
       orderBy('createdAt', 'desc'),
       limit(1)
     );
-    return onSnapshot(myRequestQuery, (snapshot) => {
-      const first = snapshot.docs[0];
-      setRequest(first ? requestFromDoc(first.id, first.data()) : null);
-      setLoading(false);
-    });
+    return onSnapshot(
+      myRequestQuery,
+      (snapshot) => {
+        const first = snapshot.docs[0];
+        setRequest(first ? requestFromDoc(first.id, first.data()) : null);
+        setLoading(false);
+      },
+      (error) => {
+        console.warn('useMyRequestForBook listener failed', error);
+        setLoading(false);
+      }
+    );
   }, [bookId, user]);
 
   return { request, loading };
@@ -93,16 +114,32 @@ export function useMyRequests() {
     const borrowerQuery = query(collection(requireDb(), 'requests'), where('borrowerId', '==', user.uid));
     const lenderQuery = query(collection(requireDb(), 'requests'), where('lenderId', '==', user.uid));
 
-    const unsubBorrower = onSnapshot(borrowerQuery, (snapshot) => {
-      setAsBorrower(snapshot.docs.map((d) => requestFromDoc(d.id, d.data())));
-      borrowerReady = true;
-      checkDone();
-    });
-    const unsubLender = onSnapshot(lenderQuery, (snapshot) => {
-      setAsLender(snapshot.docs.map((d) => requestFromDoc(d.id, d.data())));
-      lenderReady = true;
-      checkDone();
-    });
+    const unsubBorrower = onSnapshot(
+      borrowerQuery,
+      (snapshot) => {
+        setAsBorrower(snapshot.docs.map((d) => requestFromDoc(d.id, d.data())));
+        borrowerReady = true;
+        checkDone();
+      },
+      (error) => {
+        console.warn('useMyRequests (borrower) listener failed', error);
+        borrowerReady = true;
+        checkDone();
+      }
+    );
+    const unsubLender = onSnapshot(
+      lenderQuery,
+      (snapshot) => {
+        setAsLender(snapshot.docs.map((d) => requestFromDoc(d.id, d.data())));
+        lenderReady = true;
+        checkDone();
+      },
+      (error) => {
+        console.warn('useMyRequests (lender) listener failed', error);
+        lenderReady = true;
+        checkDone();
+      }
+    );
 
     return () => {
       unsubBorrower();
@@ -133,6 +170,7 @@ export function useRequestActions() {
           lenderName: book.ownerName,
           status: 'Requested',
           proposedDueDate: null,
+          lastProposedBy: null,
           damageSeverity: 'None',
           damageFee: null,
           damageReportedAt: null,
@@ -164,20 +202,32 @@ export function useRequestActions() {
   }, []);
 
   const proposeDueDate = useCallback(
-    (requestId: string, dueDate: string) =>
-      setRequestFields(requestId, { status: 'Under Negotiation', proposedDueDate: dueDate }),
-    [setRequestFields]
+    (requestId: string, dueDate: Date) => {
+      if (!user) throw new Error('Must be signed in to propose a due date');
+      return setRequestFields(requestId, {
+        status: 'Under Negotiation',
+        proposedDueDate: dueDateTimestamp(dueDate),
+        lastProposedBy: user.uid,
+      });
+    },
+    [setRequestFields, user]
   );
 
   const counterProposal = useCallback(
-    (requestId: string, dueDate: string) =>
-      setRequestFields(requestId, { status: 'Under Negotiation', proposedDueDate: dueDate }),
-    [setRequestFields]
+    (requestId: string, dueDate: Date) => {
+      if (!user) throw new Error('Must be signed in to counter a proposal');
+      return setRequestFields(requestId, {
+        status: 'Under Negotiation',
+        proposedDueDate: dueDateTimestamp(dueDate),
+        lastProposedBy: user.uid,
+      });
+    },
+    [setRequestFields, user]
   );
 
   const acceptProposal = useCallback(
-    (requestId: string, dueDate: string) =>
-      setRequestFields(requestId, { status: 'Confirmed', proposedDueDate: dueDate }),
+    // Accepting keeps the already-stored proposedDueDate as the agreed date.
+    (requestId: string) => setRequestFields(requestId, { status: 'Confirmed' }),
     [setRequestFields]
   );
 
