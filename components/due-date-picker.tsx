@@ -1,9 +1,8 @@
 import DateTimePicker, { DateTimePickerAndroid, type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useState } from 'react';
-import { Platform, Pressable, StyleSheet, TextInput } from 'react-native';
+import { Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import { ACCENT_COLOR } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useThemeColor } from '@/hooks/use-theme-color';
@@ -29,7 +28,7 @@ export function DueDatePicker({ value, onChange }: Props) {
   if (Platform.OS === 'web') {
     const invalid = webText.length > 0 && !parseDueDate(webText);
     return (
-      <ThemedView style={styles.wrapper}>
+      <View style={styles.wrapper}>
         <TextInput
           value={webText}
           onChangeText={(text) => {
@@ -41,7 +40,7 @@ export function DueDatePicker({ value, onChange }: Props) {
           style={[styles.field, { color: textColor }]}
         />
         {invalid && <ThemedText style={styles.error}>Use DD-MM-YYYY, e.g. 05-11-2026</ThemedText>}
-      </ThemedView>
+      </View>
     );
   }
 
@@ -61,7 +60,7 @@ export function DueDatePicker({ value, onChange }: Props) {
   };
 
   return (
-    <ThemedView style={styles.wrapper}>
+    <View style={styles.wrapper}>
       <Pressable onPress={openPicker} style={styles.field}>
         <ThemedText style={!value && styles.placeholder}>
           {value ? formatDueDate(value) : 'Select a date (DD-MM-YYYY)'}
@@ -69,7 +68,7 @@ export function DueDatePicker({ value, onChange }: Props) {
       </Pressable>
 
       {Platform.OS === 'ios' && iosOpen && (
-        <ThemedView>
+        <View>
           <DateTimePicker
             value={value ?? minimumDate}
             mode="date"
@@ -84,9 +83,9 @@ export function DueDatePicker({ value, onChange }: Props) {
           <Pressable onPress={() => setIosOpen(false)} style={styles.doneButton}>
             <ThemedText type="link">Done</ThemedText>
           </Pressable>
-        </ThemedView>
+        </View>
       )}
-    </ThemedView>
+    </View>
   );
 }
 

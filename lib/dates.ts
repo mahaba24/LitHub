@@ -42,3 +42,13 @@ export function startOfToday(): Date {
   const now = new Date();
   return new Date(now.getFullYear(), now.getMonth(), now.getDate());
 }
+
+/** List timestamps: "09:23" today, "Yesterday", otherwise DD-MM-YYYY. */
+export function formatActivityTime(millis: number, now = new Date()): string {
+  const date = new Date(millis);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+  if (date >= today) return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  if (date >= yesterday) return 'Yesterday';
+  return formatDueDate(date);
+}
