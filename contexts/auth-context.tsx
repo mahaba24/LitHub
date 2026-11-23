@@ -1,5 +1,7 @@
+import { FirebaseError } from 'firebase/app';
 import {
   createUserWithEmailAndPassword,
+  deleteUser,
   onAuthStateChanged,
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
@@ -27,7 +29,27 @@ type AuthContextValue = {
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   updateLocation: (location: GeoPoint) => Promise<void>;
+  /**
+   * Deletes the Firebase Auth user. The onAuthUserDeleted Cloud Function then
+   * removes their profile, books and follows and renames their messages,
+   * reviews and requests to "Deleted user". Throws RecentLoginRequiredError
+   * if Firebase wants a fresh sign-in first (nothing is deleted in that case).
+   */
+  deleteAccount: () => Promise<void>;
 };
+
+export class RecentLoginRequiredError extends Error {
+  constructor() {
+    super('Please sign in again before deleting your account.');
+    this.name = 'RecentLoginRequiredError';
+  }
+}
+
+/** ~1.1 km precision: enough for "2 km away", too coarse to locate a home. */
+function approximate(location: GeoPoint): GeoPoint {
+  const round = (n: number) => Math.round(n * 100) / 100;
+  return { latitude: round(location.latitude), longitude: round(location.longitude) };
+}
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
@@ -148,7 +170,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       updateLocation: async (location) => {
         requireFirebase();
         if (!user) throw new Error('Not signed in');
-        await updateDoc(doc(db!, 'users', user.uid), { location });
+        // Profiles are readable by every signed-in user, so only store a
+        // rounded position (the Privacy Policy promises approximate location).
+        await updateDoc(doc(db!, 'users', user.uid), { location: approximate(location) });
+      },
+      deleteAccount: async () => {
+        requireFirebase();
+        const current = auth!.currentUser;
+        if (!current) throw new Error('Not signed in');
+        try {
+          await deleteUser(current);
+        } catch (error) {
+          if (error instanceof FirebaseError && error.code === 'auth/requires-recent-login') {
+            throw new RecentLoginRequiredError();
+          }
+          throw error;
+        }
       },
     }),
     [user, profile, profileStatus, profileError, initializing]

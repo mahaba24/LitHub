@@ -5,11 +5,17 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { Avatar } from '@/components/avatar';
 import { SafetyBanner } from '@/components/safety-banner';
+import { useUserSafety } from '@/components/safety/use-user-safety';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { BottomSheet } from '@/components/ui/bottom-sheet';
+import { Button } from '@/components/ui/button';
+import { Card, CardSeparator } from '@/components/ui/card';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { NavRow } from '@/components/ui/nav-row';
 import { ACCENT_COLOR } from '@/constants/theme';
 import { useAuth } from '@/contexts/auth-context';
+import { isPermissionDenied } from '@/hooks/use-blocks';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useMessages, useSendMessage } from '@/hooks/use-messages';
 import { useRequest } from '@/hooks/use-requests';
@@ -72,6 +78,24 @@ export default function ChatScreen() {
   const { sendMessage } = useSendMessage(id);
   const [text, setText] = useState('');
   const [sendError, setSendError] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const counterpartIdOrUndefined = request
+    ? user?.uid === request.lenderId
+      ? request.borrowerId
+      : request.lenderId
+    : undefined;
+  const counterpartName = request
+    ? user?.uid === request.lenderId
+      ? request.borrowerName
+      : request.lenderName
+    : '';
+  const safety = useUserSafety({
+    uid: counterpartIdOrUndefined,
+    name: counterpartName,
+    source: 'chat',
+    requestId: id,
+  });
+  const muted = useThemeColor({}, 'mutedText');
   const textColor = useThemeColor({}, 'text');
   const colorScheme = useColorScheme();
   const listRef = useRef<FlatList<ChatMessage>>(null);
@@ -109,6 +133,13 @@ export default function ChatScreen() {
   const counterpartId = isLender ? request.borrowerId : request.lenderId;
   const canSend = text.trim().length > 0;
 
+  // iOS can't present an Alert or another Modal while this sheet is still
+  // animating out, so wait for the slide-down before the next step.
+  const closeMenuThen = (next: () => void) => {
+    setMenuOpen(false);
+    setTimeout(next, Platform.OS === 'ios' ? 350 : 0);
+  };
+
   const handleSend = async () => {
     const toSend = text;
     setText('');
@@ -119,7 +150,15 @@ export default function ChatScreen() {
       console.warn('sendMessage failed', error);
       // Give the text back so a failed send isn't silently lost.
       setText((current) => current || toSend);
-      setSendError(error instanceof Error ? error.message : 'Message failed to send');
+      // A block on either side surfaces as permission-denied. Don't reveal
+      // whether *they* blocked *you*.
+      setSendError(
+        isPermissionDenied(error)
+          ? `You can’t message ${counterpart} right now.`
+          : error instanceof Error
+            ? error.message
+            : 'Message failed to send'
+      );
     }
   };
 
@@ -139,6 +178,15 @@ export default function ChatScreen() {
               <ThemedText type="defaultSemiBold" numberOfLines={1}>
                 {counterpart}
               </ThemedText>
+            </Pressable>
+          ),
+          headerRight: () => (
+            <Pressable
+              onPress={() => setMenuOpen(true)}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel={`Options for ${counterpart}`}>
+              <IconSymbol name="ellipsis.circle" size={24} color={ACCENT_COLOR} />
             </Pressable>
           ),
         }}
@@ -183,6 +231,14 @@ export default function ChatScreen() {
         {sendError && (
           <ThemedText style={styles.sendError}>Couldn&apos;t send: {sendError}</ThemedText>
         )}
+        {safety.isBlocked ? (
+          <ThemedView style={styles.blockedBar}>
+            <ThemedText style={[styles.blockedText, { color: muted }]}>
+              You blocked {counterpart}. You can still read past messages.
+            </ThemedText>
+            <Button label="Unblock" outline disabled={safety.busy} onPress={safety.confirmAndUnblock} />
+          </ThemedView>
+        ) : (
         <ThemedView style={styles.inputRow}>
           <TextInput
             value={text}
@@ -204,7 +260,40 @@ export default function ChatScreen() {
             <IconSymbol name="paperplane.fill" size={18} color="#fff" />
           </Pressable>
         </ThemedView>
+        )}
       </KeyboardAvoidingView>
+
+      <BottomSheet visible={menuOpen} onClose={() => setMenuOpen(false)} title={counterpart}>
+        <Card>
+          <NavRow
+            icon="person.crop.circle"
+            iconColor={ACCENT_COLOR}
+            label="View profile"
+            onPress={() => {
+              setMenuOpen(false);
+              router.push(`/user/${counterpartId}`);
+            }}
+          />
+          <CardSeparator />
+          <NavRow
+            icon="exclamationmark.bubble.fill"
+            iconColor="#FF9500"
+            label={`Report ${counterpart}`}
+            detail="Spam, inappropriate behaviour or an unsafe meetup"
+            onPress={() => closeMenuThen(safety.openReport)}
+          />
+          <CardSeparator />
+          <NavRow
+            icon="nosign"
+            iconColor="#FF3B30"
+            label={safety.isBlocked ? `Unblock ${counterpart}` : `Block ${counterpart}`}
+            detail={safety.isBlocked ? 'Allow requests and messages again' : 'Stop requests and messages both ways'}
+            onPress={() => closeMenuThen(safety.isBlocked ? safety.confirmAndUnblock : safety.confirmAndBlock)}
+          />
+        </Card>
+        <Button label="Cancel" outline onPress={() => setMenuOpen(false)} />
+      </BottomSheet>
+      {safety.reportSheet}
     </>
   );
 }
@@ -212,6 +301,17 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   flex: {
     flex: 1,
+  },
+  blockedBar: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 24,
+    gap: 10,
+  },
+  blockedText: {
+    fontSize: 14,
+    lineHeight: 19,
+    textAlign: 'center',
   },
   headerTitle: {
     flexDirection: 'row',

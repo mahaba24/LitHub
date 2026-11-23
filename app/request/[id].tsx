@@ -231,13 +231,16 @@ export default function NegotiationScreen() {
                   {request.proposedDueDate ? formatDueDate(request.proposedDueDate) : 'the agreed date'}
                 </ThemedText>
               </View>
-              <Button
-                variant="success"
-                icon="checkmark"
-                label="Mark as Returned"
-                disabled={isSubmitting}
-                onPress={() => markReturned(request.id)}
-              />
+              {/* Only the lender can confirm the book came back (enforced in firestore.rules). */}
+              {isLender && (
+                <Button
+                  variant="success"
+                  icon="checkmark"
+                  label="Mark as Returned"
+                  disabled={isSubmitting}
+                  onPress={() => markReturned(request.id)}
+                />
+              )}
               {isLender && (
                 <Button
                   variant="destructive"

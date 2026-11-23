@@ -1,8 +1,7 @@
-import { collection, getDocs, query, Timestamp, where } from 'firebase/firestore';
+import { collection, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 import { useEffect, useMemo, useState } from 'react';
 
 import { requireDb } from '@/lib/firebase';
-import { requestFromDoc } from '@/lib/requests';
 import { userProfileFromDoc } from '@/lib/users';
 import { useBooks } from '@/hooks/use-books';
 import type { Book } from '@/types/book';
@@ -41,6 +40,11 @@ export function useTopReaders(limitCount = 10) {
   return { readers, loading, error };
 }
 
+/** UTC `YYYY-MM`, matching monthKey() in functions/src/index.ts. */
+function currentMonthKey(now = new Date()) {
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
 export type BookOfTheMonthEntry = {
   book: Book;
   requestCount: number;
@@ -55,21 +59,24 @@ export function useBookOfTheMonth(limitCount = 3) {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    const monthlyRequestsQuery = query(
-      collection(requireDb(), 'requests'),
-      where('createdAt', '>=', Timestamp.fromDate(startOfMonth))
+    // Requests are private to their two parties, so we read the public
+    // per-book counters maintained by the onRequestCreatedCountBook Cloud
+    // Function. Fetch a few extra in case some books were since deleted.
+    const monthlyCountsQuery = query(
+      collection(requireDb(), 'monthlyBookCounts'),
+      where('month', '==', currentMonthKey()),
+      orderBy('count', 'desc'),
+      limit(limitCount + 7)
     );
 
-    getDocs(monthlyRequestsQuery)
+    getDocs(monthlyCountsQuery)
       .then((snapshot) => {
         if (cancelled) return;
         const tally = new Map<string, number>();
         snapshot.docs.forEach((d) => {
-          const req = requestFromDoc(d.id, d.data());
-          tally.set(req.bookId, (tally.get(req.bookId) ?? 0) + 1);
+          const { bookId, count } = d.data();
+          if (typeof bookId === 'string' && typeof count === 'number') tally.set(bookId, count);
         });
         setCounts(tally);
         setLoading(false);
@@ -83,7 +90,7 @@ export function useBookOfTheMonth(limitCount = 3) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [limitCount]);
 
   const entries = useMemo<BookOfTheMonthEntry[]>(() => {
     const byId = new Map(books.map((b) => [b.id, b] as const));

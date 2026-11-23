@@ -2,6 +2,15 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    // True if `ownerUid` has blocked `otherUid`. exists() works regardless of
+    // the blocks read rule, so enforcement doesn't reveal the block list.
+    function hasBlocked(ownerUid, otherUid) {
+      return exists(/databases/$(database)/documents/users/$(ownerUid)/blocks/$(otherUid));
+    }
+    function eitherBlocked(a, b) {
+      return hasBlocked(a, b) || hasBlocked(b, a);
+    }
+
     match /users/{userId} {
       allow read: if request.auth != null;
       // trustScore/completedReturns/reviewCount/averageRating are maintained
@@ -17,6 +26,18 @@ service cloud.firestore {
         && !request.resource.data.diff(resource.data).affectedKeys()
           .hasAny(['trustScore', 'completedReturns', 'reviewCount', 'averageRating']);
       allow delete: if false;
+
+      // users/{me}/blocks/{blockedUid}: private to me. Doc id is the blocked
+      // uid so each block exists once and hasBlocked() is a single lookup.
+      match /blocks/{blockedUid} {
+        allow read, delete: if request.auth != null && request.auth.uid == userId;
+        allow create: if request.auth != null && request.auth.uid == userId
+          && blockedUid != userId
+          && request.resource.data.keys().hasOnly(['blockedUid', 'createdAt'])
+          && request.resource.data.blockedUid == blockedUid
+          && request.resource.data.createdAt == request.time;
+        allow update: if false;
+      }
     }
 
     match /books/{bookId} {
@@ -34,25 +55,86 @@ service cloud.firestore {
       allow read: if request.auth != null
         && (resource.data.borrowerId == request.auth.uid
           || resource.data.lenderId == request.auth.uid);
+      // A new request starts clean: no proposal and no damage, so neither can
+      // be smuggled in at creation and then carried through the transitions.
       allow create: if request.auth != null
         && request.resource.data.borrowerId == request.auth.uid
         && request.resource.data.lenderId != request.auth.uid
-        && request.resource.data.status == 'Requested';
-      // Only the two parties can update, and only the mutable fields
-      // (status/proposedDueDate/updatedAt) — the participants and book are
-      // fixed at creation.
-      allow update: if request.auth != null
-        && request.auth.uid in [resource.data.borrowerId, resource.data.lenderId]
-        && request.resource.data.borrowerId == resource.data.borrowerId
-        && request.resource.data.lenderId == resource.data.lenderId
-        && request.resource.data.bookId == resource.data.bookId
-        // Any proposal/counter must be stamped with the caller as proposer…
-        && (request.resource.data.status != 'Under Negotiation'
-          || request.resource.data.lastProposedBy == request.auth.uid)
-        // …and only the other party may accept it.
-        && !(resource.data.status == 'Under Negotiation'
-          && request.resource.data.status == 'Confirmed'
-          && resource.data.get('lastProposedBy', null) == request.auth.uid);
+        && request.resource.data.status == 'Requested'
+        && !eitherBlocked(request.resource.data.lenderId, request.auth.uid)
+        && request.resource.data.get('proposedDueDate', null) == null
+        && request.resource.data.get('lastProposedBy', null) == null
+        && request.resource.data.get('damageSeverity', 'None') == 'None'
+        && request.resource.data.get('damageFee', null) == null
+        && request.resource.data.get('damageReportedAt', null) == null;
+
+      // Status is a strict state machine. Every update must be exactly one of
+      // the transitions below, and each transition may only touch its own
+      // fields (participants, book, etc. are therefore immutable too):
+      //   Requested         -> Under Negotiation  (either party, first proposal)
+      //   Under Negotiation -> Under Negotiation  (counter, by the other party)
+      //   Under Negotiation -> Confirmed          (accept, by the other party)
+      //   Confirmed         -> Completed          (lender only, optional damage)
+      // Confirmed -> Overdue is set by the scheduled Cloud Function (Admin SDK
+      // bypasses rules), so no client rule allows it. Completed/Overdue are
+      // terminal for clients.
+      function isParty() {
+        return request.auth != null
+          && (request.auth.uid == resource.data.borrowerId
+            || request.auth.uid == resource.data.lenderId);
+      }
+      function fromTo(from, to) {
+        return resource.data.status == from && request.resource.data.status == to;
+      }
+      function onlyChanges(keys) {
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+      }
+      // Legacy docs may lack lastProposedBy; treat that as "nobody proposed".
+      function lastProposer() {
+        return resource.data.get('lastProposedBy', null);
+      }
+      function isValidProposal() {
+        return onlyChanges(['status', 'proposedDueDate', 'lastProposedBy', 'updatedAt'])
+          && request.resource.data.proposedDueDate is timestamp
+          && request.resource.data.lastProposedBy == request.auth.uid
+          && request.resource.data.updatedAt == request.time;
+      }
+      function isValidCompletion() {
+        let d = request.resource.data;
+        return request.auth.uid == resource.data.lenderId
+          && d.updatedAt == request.time
+          && (
+            // Plain return: nothing but status/updatedAt changes.
+            onlyChanges(['status', 'updatedAt'])
+            // Damage report: severity and fee must match the fixed tiers.
+            || (onlyChanges(['status', 'updatedAt', 'damageSeverity', 'damageFee', 'damageReportedAt'])
+              && ((d.damageSeverity == 'Minor' && d.damageFee == 5)
+                || (d.damageSeverity == 'Moderate' && d.damageFee == 15)
+                || (d.damageSeverity == 'Severe' && d.damageFee == 30))
+              && d.damageReportedAt == request.time)
+          );
+      }
+
+      // A block (in either direction) freezes negotiation, but the lender
+      // can still mark a Confirmed loan returned so the book isn't stuck.
+      function notBlocked() {
+        return !eitherBlocked(resource.data.borrowerId, resource.data.lenderId);
+      }
+
+      allow update: if isParty() && (
+        (fromTo('Requested', 'Under Negotiation') && notBlocked() && isValidProposal())
+        || (fromTo('Under Negotiation', 'Under Negotiation')
+          && notBlocked()
+          && lastProposer() != request.auth.uid
+          && isValidProposal())
+        // Accepting keeps the stored proposedDueDate as the agreed date.
+        || (fromTo('Under Negotiation', 'Confirmed')
+          && notBlocked()
+          && lastProposer() != request.auth.uid
+          && onlyChanges(['status', 'updatedAt'])
+          && request.resource.data.updatedAt == request.time)
+        || (fromTo('Confirmed', 'Completed') && isValidCompletion())
+      );
       allow delete: if false;
 
       match /messages/{messageId} {
@@ -62,9 +144,14 @@ service cloud.firestore {
             get(/databases/$(database)/documents/requests/$(requestId)).data.lenderId
           ];
         }
+        function parent() {
+          return get(/databases/$(database)/documents/requests/$(requestId)).data;
+        }
         allow read: if request.auth != null && isParty();
+        // Existing history stays readable after a block; new messages don't.
         allow create: if request.auth != null && isParty()
-          && request.resource.data.senderId == request.auth.uid;
+          && request.resource.data.senderId == request.auth.uid
+          && !eitherBlocked(parent().borrowerId, parent().lenderId);
         allow update, delete: if false;
       }
     }
@@ -89,6 +176,44 @@ service cloud.firestore {
         && request.resource.data.revieweeRole == (
           request.resource.data.revieweeId == reviewedRequest().borrowerId ? 'borrower' : 'lender');
       allow update, delete: if false;
+    }
+
+    match /reports/{reportId} {
+      // Write-only inbox for moderation, read via the Firebase console /
+      // Admin SDK. Nobody, including the reporter, can read or edit reports
+      // from the app.
+      function r() { return request.resource.data; }
+      function isValidSource() {
+        return (r().source == 'profile' && !('requestId' in r()))
+          // From a chat: the request must really be between these two people.
+          || (r().source == 'chat'
+            && r().requestId is string
+            && [get(/databases/$(database)/documents/requests/$(r().requestId)).data.borrowerId,
+                get(/databases/$(database)/documents/requests/$(r().requestId)).data.lenderId]
+              .toSet() == [request.auth.uid, r().reportedUserId].toSet());
+      }
+      allow create: if request.auth != null
+        && r().keys().hasAll(['reporterId', 'reportedUserId', 'reason', 'source', 'createdAt'])
+        && r().keys().hasOnly(['reporterId', 'reportedUserId', 'reason', 'note', 'source', 'requestId', 'createdAt'])
+        && r().reporterId == request.auth.uid
+        && r().reportedUserId is string
+        && r().reportedUserId != request.auth.uid
+        && exists(/databases/$(database)/documents/users/$(r().reportedUserId))
+        && r().reason in ['Spam', 'Inappropriate behaviour', 'Unsafe meetup', 'Other']
+        && (!('note' in r()) || (r().note is string && r().note.size() <= 1000))
+        && r().createdAt == request.time
+        && isValidSource();
+      allow read, update, delete: if false;
+    }
+
+    match /monthlyBookCounts/{counterId} {
+      // Public aggregate for Book of the Month: book id + count only, nothing
+      // about who requested. Written exclusively by the
+      // onRequestCreatedCountBook Cloud Function (Admin SDK). The per-borrower
+      // `counted/{borrowerId}` markers underneath have no match block, so
+      // they're unreadable and unwritable for clients.
+      allow read: if request.auth != null;
+      allow write: if false;
     }
 
     match /follows/{followId} {

@@ -1,12 +1,18 @@
 import { collection, doc, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
+import { useBlockedIds } from '@/hooks/use-blocks';
 import { bookFromDoc } from '@/lib/books';
 import { requireDb } from '@/lib/firebase';
 import type { Book } from '@/types/book';
 
+/**
+ * All listed books, minus books owned by people I've blocked. That filter is
+ * a display preference only: the rules can't hide list results per viewer.
+ */
 export function useBooks() {
-  const [books, setBooks] = useState<Book[]>([]);
+  const { blockedIds } = useBlockedIds();
+  const [allBooks, setBooks] = useState<Book[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -25,6 +31,7 @@ export function useBooks() {
     );
   }, []);
 
+  const books = useMemo(() => allBooks.filter((b) => !blockedIds.has(b.ownerId)), [allBooks, blockedIds]);
   return { books, loading, error };
 }
 
@@ -84,6 +91,7 @@ const IN_QUERY_LIMIT = 30;
  * listener per 30 owners; needs the books (ownerId, createdAt desc) index.
  */
 export function useBooksFromOwners(ownerIds: string[], maxResults = 20) {
+  const { blockedIds } = useBlockedIds();
   const [booksByChunk, setBooksByChunk] = useState<Record<number, Book[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -127,7 +135,7 @@ export function useBooksFromOwners(ownerIds: string[], maxResults = 20) {
 
   const books = Object.values(booksByChunk)
     .flat()
-    .filter((book) => book.available)
+    .filter((book) => book.available && !blockedIds.has(book.ownerId))
     .sort((a, b) => b.createdAt - a.createdAt)
     .slice(0, maxResults);
 

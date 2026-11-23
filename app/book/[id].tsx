@@ -1,4 +1,5 @@
 import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { Avatar } from '@/components/avatar';
@@ -9,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useAuth } from '@/contexts/auth-context';
+import { isPermissionDenied, useBlockedIds } from '@/hooks/use-blocks';
 import { useBook } from '@/hooks/use-books';
 import { useMyRequestForBook, useRequestActions } from '@/hooks/use-requests';
 import { useThemeColor } from '@/hooks/use-theme-color';
@@ -20,6 +22,8 @@ export default function BookDetailScreen() {
   const { user, profile } = useAuth();
   const { request: myRequest } = useMyRequestForBook(id);
   const { status, createRequest } = useRequestActions();
+  const { blockedIds } = useBlockedIds();
+  const [requestError, setRequestError] = useState<string | null>(null);
   const background = useThemeColor({}, 'groupedBackground');
   const muted = useThemeColor({}, 'mutedText');
   const chipBg = useThemeColor({ light: 'rgba(118,118,128,0.12)', dark: 'rgba(118,118,128,0.24)' }, 'card');
@@ -48,16 +52,30 @@ export default function BookDetailScreen() {
 
   const hasOpenRequest = myRequest && myRequest.status !== 'Completed';
   const isSubmitting = status === 'submitting';
-  const buttonDisabled = !book.available || isSubmitting || Boolean(hasOpenRequest);
+  const ownerBlocked = blockedIds.has(book.ownerId);
+  const buttonDisabled = !book.available || isSubmitting || Boolean(hasOpenRequest) || ownerBlocked;
 
   let buttonLabel = 'Request to Borrow';
-  if (!book.available) buttonLabel = 'Currently Unavailable';
+  if (ownerBlocked) buttonLabel = 'You blocked this reader';
+  else if (!book.available) buttonLabel = 'Currently Unavailable';
   else if (isSubmitting) buttonLabel = 'Sending Request…';
   else if (hasOpenRequest) buttonLabel = `Requested (${myRequest!.status})`;
 
   const handleRequest = async () => {
-    const requestId = await createRequest(book);
-    router.push(`/request/${requestId}`);
+    setRequestError(null);
+    try {
+      const requestId = await createRequest(book);
+      router.push(`/request/${requestId}`);
+    } catch (error) {
+      console.warn('createRequest failed', error);
+      // A block on either side surfaces as permission-denied; don't reveal
+      // whether the owner blocked you.
+      setRequestError(
+        isPermissionDenied(error)
+          ? 'You can’t request books from this reader.'
+          : 'Couldn’t send the request. Check your connection and try again.'
+      );
+    }
   };
 
   return (
@@ -114,6 +132,7 @@ export default function BookDetailScreen() {
           ) : (
             <>
               <Button label={buttonLabel} disabled={buttonDisabled} onPress={handleRequest} />
+              {requestError && <ThemedText style={styles.requestError}>{requestError}</ThemedText>}
               {hasOpenRequest && (
                 <Button label="View request" outline onPress={() => router.push(`/request/${myRequest!.id}`)} />
               )}
@@ -132,6 +151,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   content: { padding: 16, paddingBottom: 40, gap: 24 },
+  requestError: { color: '#E03131', fontSize: 14, textAlign: 'center' },
   hero: { alignItems: 'center', gap: 6, paddingTop: 8 },
   coverShadow: {
     marginBottom: 12,

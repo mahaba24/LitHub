@@ -41,6 +41,11 @@ const MAPPING = {
   'mappin.and.ellipse': 'place',
   calendar: 'event',
   'hourglass': 'hourglass-empty',
+  'hand.raised.fill': 'privacy-tip',
+  'exclamationmark.bubble.fill': 'report',
+  'nosign': 'block',
+  'ellipsis.circle': 'more-horiz',
+  'person.crop.circle': 'account-circle',
 } as IconMapping;
 
 /**

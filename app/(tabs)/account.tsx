@@ -1,5 +1,6 @@
 import { router } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/avatar';
@@ -11,17 +12,20 @@ import { Card, CardSeparator } from '@/components/ui/card';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { NavRow } from '@/components/ui/nav-row';
 import { ACCENT_COLOR } from '@/constants/theme';
-import { useAuth } from '@/contexts/auth-context';
+import { RecentLoginRequiredError, useAuth } from '@/contexts/auth-context';
 import { useFollowing } from '@/hooks/use-follows';
 import { useDeviceLocation } from '@/hooks/use-location';
 import { useMyRequests } from '@/hooks/use-requests';
 import { useThemeColor } from '@/hooks/use-theme-color';
+import { getAuthErrorMessage } from '@/lib/auth-errors';
+import { confirm, notify } from '@/lib/confirm';
 import { requestNeedsActionFrom } from '@/lib/requests';
 
 const DESTRUCTIVE = '#FF3B30';
 
 export default function AccountScreen() {
-  const { user, profile, profileStatus, profileError, signOut, updateLocation } = useAuth();
+  const { user, profile, profileStatus, profileError, signOut, updateLocation, deleteAccount } = useAuth();
+  const [deleting, setDeleting] = useState(false);
   const { status, requestLocation } = useDeviceLocation();
   const { requests } = useMyRequests();
   const { follows: following } = useFollowing(user?.uid);
@@ -38,6 +42,39 @@ export default function AccountScreen() {
         ? user?.displayName || 'Profile unavailable'
         : 'Loading…');
   const isLocating = status === 'requesting';
+
+  const runDelete = async () => {
+    setDeleting(true);
+    try {
+      // On success the auth listener signs us out and the router guard
+      // sends the user to the auth screens; nothing else to do here.
+      await deleteAccount();
+    } catch (error) {
+      setDeleting(false);
+      if (error instanceof RecentLoginRequiredError) {
+        const signInAgain = await confirm({
+          title: 'Please sign in again',
+          message:
+            'For your security, Firebase needs you to have signed in recently before deleting your account. Nothing has been deleted. Sign in again, then tap “Delete my account”.',
+          confirmLabel: 'Sign In Again',
+        });
+        if (signInAgain) await signOut();
+        return;
+      }
+      notify('Couldn’t delete account', getAuthErrorMessage(error));
+    }
+  };
+
+  const confirmDelete = async () => {
+    const ok = await confirm({
+      title: 'Delete your account?',
+      message:
+        'This permanently deletes your login, profile, location, listed books, follows and block list. Messages and reviews you wrote will stay but show “Deleted user”. This can’t be undone.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
+    if (ok) await runDelete();
+  };
 
   const handleShareLocation = async () => {
     const point = await requestLocation();
@@ -130,6 +167,24 @@ export default function AccountScreen() {
         )}
       </Card>
 
+      <Card title="Privacy & Safety">
+        <NavRow
+          icon="nosign"
+          iconColor="#FF3B30"
+          label="Blocked users"
+          detail="See and unblock people you've blocked"
+          onPress={() => router.push('/blocked-users')}
+        />
+        <CardSeparator />
+        <NavRow
+          icon="hand.raised.fill"
+          iconColor="#5856D6"
+          label="Privacy Policy"
+          detail="What we store and why"
+          onPress={() => router.push('/privacy')}
+        />
+      </Card>
+
       <Card>
         <Pressable
           onPress={() => signOut()}
@@ -137,6 +192,21 @@ export default function AccountScreen() {
           style={({ pressed }) => [styles.signOutRow, pressed && styles.pressed]}>
           <IconSymbol name="rectangle.portrait.and.arrow.right" size={18} color={DESTRUCTIVE} />
           <ThemedText style={styles.signOutText}>Sign Out</ThemedText>
+        </Pressable>
+      </Card>
+
+      <Card footer="Permanently deletes your login, profile, books, follows and block list. Your messages and reviews stay, shown as “Deleted user”.">
+        <Pressable
+          onPress={confirmDelete}
+          disabled={deleting}
+          accessibilityRole="button"
+          style={({ pressed }) => [styles.signOutRow, (pressed || deleting) && styles.pressed]}>
+          {deleting ? (
+            <ActivityIndicator color={DESTRUCTIVE} />
+          ) : (
+            <IconSymbol name="trash" size={18} color={DESTRUCTIVE} />
+          )}
+          <ThemedText style={styles.signOutText}>{deleting ? 'Deleting account…' : 'Delete my account'}</ThemedText>
         </Pressable>
       </Card>
     </ScrollView>
