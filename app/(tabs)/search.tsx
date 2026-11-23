@@ -1,10 +1,11 @@
-import { Image } from 'expo-image';
-import { Link } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, TextInput } from 'react-native';
+import { FlatList, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { BookCard } from '@/components/book-card';
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
+import { IconSymbol } from '@/components/ui/icon-symbol';
+import { ScreenTitle } from '@/components/ui/screen-title';
 import { useAuth } from '@/contexts/auth-context';
 import { useBooks } from '@/hooks/use-books';
 import { useMyBooks } from '@/hooks/use-my-books';
@@ -12,25 +13,13 @@ import { useThemeColor } from '@/hooks/use-theme-color';
 import { formatDistanceMiles, haversineDistanceMiles } from '@/lib/geo';
 import type { Book } from '@/types/book';
 
-function BookRow({ book, distanceMiles }: { book: Book; distanceMiles?: number }) {
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  const muted = useThemeColor({}, 'mutedText');
   return (
-    <Link href={`/book/${book.id}`} asChild>
-      <Pressable style={styles.row}>
-        {book.coverUrl ? (
-          <Image source={{ uri: book.coverUrl }} style={styles.cover} contentFit="cover" />
-        ) : (
-          <ThemedView style={styles.coverPlaceholder} />
-        )}
-        <ThemedView style={styles.info}>
-          <ThemedText type="defaultSemiBold">{book.title}</ThemedText>
-          <ThemedText>{book.author}</ThemedText>
-          <ThemedText style={styles.meta}>
-            {book.genre}
-            {distanceMiles !== undefined ? ` · ${formatDistanceMiles(distanceMiles)}` : ''}
-          </ThemedText>
-        </ThemedView>
-      </Pressable>
-    </Link>
+    <View style={styles.section}>
+      <ThemedText style={[styles.sectionTitle, { color: muted }]}>{title}</ThemedText>
+      {children}
+    </View>
   );
 }
 
@@ -39,7 +28,11 @@ export default function SearchScreen() {
   const { books } = useBooks();
   const { books: myBooks } = useMyBooks();
   const { user, profile } = useAuth();
+  const insets = useSafeAreaInsets();
   const textColor = useThemeColor({}, 'text');
+  const background = useThemeColor({}, 'groupedBackground');
+  const card = useThemeColor({}, 'card');
+  const muted = useThemeColor({}, 'mutedText');
 
   const otherBooks = useMemo(() => books.filter((b) => b.ownerId !== user?.uid), [books, user]);
 
@@ -74,103 +67,92 @@ export default function SearchScreen() {
   );
 
   const isSearching = query.trim().length > 0;
+  const metaFor = (book: Book, distance?: number) =>
+    [book.genre, distance !== undefined ? formatDistanceMiles(distance) : null].filter(Boolean).join(' · ');
 
   return (
     <FlatList
-      contentContainerStyle={styles.content}
+      style={{ backgroundColor: background }}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}
       data={isSearching ? filtered : []}
       keyExtractor={(item) => item.id}
       keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="on-drag"
+      ItemSeparatorComponent={() => <View style={styles.gap} />}
       ListHeaderComponent={
-        <ThemedView style={styles.header}>
-          <ThemedText type="title">Search</ThemedText>
-          <TextInput
-            value={query}
-            onChangeText={setQuery}
-            placeholder="Search by title, author, or ISBN"
-            style={[styles.input, { color: textColor }]}
-          />
-          {isSearching && filtered.length === 0 && (
-            <ThemedText style={styles.empty}>No books match &quot;{query}&quot;.</ThemedText>
-          )}
+        <View style={styles.header}>
+          <ScreenTitle title="Search" />
+          <View style={[styles.searchField, { backgroundColor: card }]}>
+            <IconSymbol name="magnifyingglass" size={18} color={muted} />
+            <TextInput
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Title, author, or ISBN"
+              placeholderTextColor={muted}
+              returnKeyType="search"
+              autoCorrect={false}
+              style={[styles.input, { color: textColor }]}
+            />
+            {isSearching && (
+              <Pressable onPress={() => setQuery('')} hitSlop={8} accessibilityLabel="Clear search">
+                <ThemedText style={[styles.clear, { color: muted }]}>✕</ThemedText>
+              </Pressable>
+            )}
+          </View>
+
+          {isSearching &&
+            (filtered.length === 0 ? (
+              <ThemedText style={[styles.empty, { color: muted }]}>No books match “{query.trim()}”.</ThemedText>
+            ) : (
+              <ThemedText style={[styles.sectionTitle, { color: muted }]}>
+                {filtered.length} RESULT{filtered.length === 1 ? '' : 'S'}
+              </ThemedText>
+            ))}
 
           {!isSearching && (
             <>
               {nearby.length > 0 && (
-                <ThemedView style={styles.section}>
-                  <ThemedText type="subtitle">Nearby</ThemedText>
+                <Section title="NEARBY">
                   {nearby.map(({ book, distance }) => (
-                    <BookRow key={book.id} book={book} distanceMiles={distance} />
+                    <BookCard key={book.id} book={book} meta={metaFor(book, distance)} />
                   ))}
-                </ThemedView>
+                </Section>
               )}
               {sameGenre.length > 0 && (
-                <ThemedView style={styles.section}>
-                  <ThemedText type="subtitle">Similar to Your Books</ThemedText>
+                <Section title="SIMILAR TO YOUR BOOKS">
                   {sameGenre.map((book) => (
-                    <BookRow key={book.id} book={book} />
+                    <BookCard key={book.id} book={book} meta={metaFor(book)} />
                   ))}
-                </ThemedView>
+                </Section>
               )}
               {nearby.length === 0 && sameGenre.length === 0 && (
-                <ThemedText style={styles.empty}>
+                <ThemedText style={[styles.empty, { color: muted }]}>
                   Search for a book, or list one of your own to see recommendations.
                 </ThemedText>
               )}
             </>
           )}
-        </ThemedView>
+        </View>
       }
-      renderItem={({ item }) => <BookRow book={item} />}
+      renderItem={({ item }) => <BookCard book={item} meta={metaFor(item)} />}
     />
   );
 }
 
 const styles = StyleSheet.create({
-  content: {
-    flexGrow: 1,
-  },
-  header: {
-    padding: 20,
-    gap: 8,
-  },
-  input: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#687076',
-    borderRadius: 8,
-    padding: 12,
-  },
-  empty: {
-    opacity: 0.7,
-    marginTop: 8,
-  },
-  section: {
-    marginTop: 16,
-    gap: 4,
-  },
-  row: {
+  content: { paddingHorizontal: 16, paddingBottom: 32, flexGrow: 1 },
+  header: { gap: 20, marginBottom: 10 },
+  searchField: {
     flexDirection: 'row',
-    gap: 12,
-    paddingVertical: 8,
     alignItems: 'center',
+    gap: 8,
+    borderRadius: 12,
+    paddingHorizontal: 12,
   },
-  cover: {
-    width: 48,
-    height: 72,
-    borderRadius: 4,
-  },
-  coverPlaceholder: {
-    width: 48,
-    height: 72,
-    borderRadius: 4,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#687076',
-  },
-  info: {
-    flex: 1,
-    gap: 2,
-  },
-  meta: {
-    opacity: 0.7,
-  },
+  input: { flex: 1, fontSize: 16, paddingVertical: 12 },
+  clear: { fontSize: 14, paddingHorizontal: 4 },
+  section: { gap: 10 },
+  sectionTitle: { fontSize: 13, lineHeight: 18, fontWeight: '600', letterSpacing: 0.6, marginLeft: 4 },
+  empty: { textAlign: 'center', marginTop: 8, lineHeight: 21 },
+  gap: { height: 10 },
 });

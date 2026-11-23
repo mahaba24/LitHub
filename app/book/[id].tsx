@@ -1,13 +1,19 @@
-import { Image } from 'expo-image';
-import { Link, router, Stack, useLocalSearchParams } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet } from 'react-native';
+import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
+import { Avatar } from '@/components/avatar';
+import { BookCover } from '@/components/book-card';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { ACCENT_COLOR } from '@/constants/theme';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useAuth } from '@/contexts/auth-context';
+import { isPermissionDenied, useBlockedIds } from '@/hooks/use-blocks';
 import { useBook } from '@/hooks/use-books';
 import { useMyRequestForBook, useRequestActions } from '@/hooks/use-requests';
+import { useThemeColor } from '@/hooks/use-theme-color';
 import { formatDistanceMiles, haversineDistanceMiles } from '@/lib/geo';
 
 export default function BookDetailScreen() {
@@ -16,7 +22,11 @@ export default function BookDetailScreen() {
   const { user, profile } = useAuth();
   const { request: myRequest } = useMyRequestForBook(id);
   const { status, createRequest } = useRequestActions();
-  const tint = ACCENT_COLOR;
+  const { blockedIds } = useBlockedIds();
+  const [requestError, setRequestError] = useState<string | null>(null);
+  const background = useThemeColor({}, 'groupedBackground');
+  const muted = useThemeColor({}, 'mutedText');
+  const chipBg = useThemeColor({ light: 'rgba(118,118,128,0.12)', dark: 'rgba(118,118,128,0.24)' }, 'card');
 
   if (loading) {
     return (
@@ -42,86 +52,93 @@ export default function BookDetailScreen() {
 
   const hasOpenRequest = myRequest && myRequest.status !== 'Completed';
   const isSubmitting = status === 'submitting';
-  const buttonDisabled = !book.available || isSubmitting || Boolean(hasOpenRequest);
+  const ownerBlocked = blockedIds.has(book.ownerId);
+  const buttonDisabled = !book.available || isSubmitting || Boolean(hasOpenRequest) || ownerBlocked;
 
   let buttonLabel = 'Request to Borrow';
-  if (!book.available) buttonLabel = 'Currently Unavailable';
+  if (ownerBlocked) buttonLabel = 'You blocked this reader';
+  else if (!book.available) buttonLabel = 'Currently Unavailable';
   else if (isSubmitting) buttonLabel = 'Sending Request…';
   else if (hasOpenRequest) buttonLabel = `Requested (${myRequest!.status})`;
 
   const handleRequest = async () => {
-    const requestId = await createRequest(book);
-    router.push(`/request/${requestId}`);
+    setRequestError(null);
+    try {
+      const requestId = await createRequest(book);
+      router.push(`/request/${requestId}`);
+    } catch (error) {
+      console.warn('createRequest failed', error);
+      // A block on either side surfaces as permission-denied; don't reveal
+      // whether the owner blocked you.
+      setRequestError(
+        isPermissionDenied(error)
+          ? 'You can’t request books from this reader.'
+          : 'Couldn’t send the request. Check your connection and try again.'
+      );
+    }
   };
 
   return (
     <>
       <Stack.Screen options={{ title: book.title }} />
-      <ScrollView contentContainerStyle={styles.content}>
-        <ThemedView style={styles.coverContainer}>
-          {book.coverUrl ? (
-            <Image source={{ uri: book.coverUrl }} style={styles.cover} contentFit="cover" />
-          ) : (
-            <ThemedView style={styles.coverPlaceholder} />
-          )}
-        </ThemedView>
-
-        <ThemedView style={styles.info}>
-          <ThemedText type="title">{book.title}</ThemedText>
-          <ThemedText type="subtitle" style={styles.author}>
-            {book.author}
+      <ScrollView style={{ backgroundColor: background }} contentContainerStyle={styles.content}>
+        <View style={styles.hero}>
+          <View style={styles.coverShadow}>
+            <BookCover uri={book.coverUrl} width={180} />
+          </View>
+          <ThemedText type="title" style={styles.title}>
+            {book.title}
           </ThemedText>
+          <ThemedText style={[styles.author, { color: muted }]}>{book.author}</ThemedText>
+          <View style={styles.chips}>
+            {[book.genre, `Condition: ${book.condition}`].filter(Boolean).map((label) => (
+              <View key={label} style={[styles.chip, { backgroundColor: chipBg }]}>
+                <ThemedText style={styles.chipText}>{label}</ThemedText>
+              </View>
+            ))}
+            <View style={[styles.chip, { backgroundColor: book.available ? '#2B8A3E1F' : chipBg }]}>
+              <ThemedText style={[styles.chipText, { color: book.available ? '#2B8A3E' : muted }]}>
+                {book.available ? 'Available' : 'Unavailable'}
+              </ThemedText>
+            </View>
+          </View>
+        </View>
 
-          <ThemedView style={styles.metaRow}>
-            <ThemedView style={styles.badge}>
-              <ThemedText type="defaultSemiBold">{book.genre}</ThemedText>
-            </ThemedView>
-            <ThemedView style={styles.badge}>
-              <ThemedText type="defaultSemiBold">Condition: {book.condition}</ThemedText>
-            </ThemedView>
-          </ThemedView>
+        {book.description ? (
+          <Card title="About this book">
+            <ThemedText style={styles.description}>{book.description}</ThemedText>
+          </Card>
+        ) : null}
 
-          <ThemedText style={styles.description}>{book.description}</ThemedText>
+        <Card title="Owner">
+          <Pressable
+            disabled={isOwner}
+            onPress={() => router.push(`/user/${book.ownerId}`)}
+            style={({ pressed }) => [styles.ownerRow, pressed && styles.pressed]}>
+            <Avatar name={book.ownerName} uid={book.ownerId} size={44} />
+            <View style={styles.ownerText}>
+              <ThemedText style={styles.ownerName}>{isOwner ? 'You' : book.ownerName}</ThemedText>
+              <ThemedText style={[styles.ownerMeta, { color: muted }]}>
+                {distance !== undefined ? `${formatDistanceMiles(distance)} · ` : ''}Meet in a public place
+              </ThemedText>
+            </View>
+            {!isOwner && <IconSymbol name="chevron.right" size={14} color={muted} />}
+          </Pressable>
+        </Card>
 
-          <ThemedText style={styles.owner}>
-            Owned by <ThemedText type="defaultSemiBold">{book.ownerName}</ThemedText>
-            {distance !== undefined ? ` · ${formatDistanceMiles(distance)}` : ''}
-          </ThemedText>
-
+        <View style={styles.actions}>
           {isOwner ? (
-            <Link href={`/edit-book/${book.id}`} asChild>
-              <Pressable style={[styles.requestButton, { backgroundColor: tint }]}>
-                <ThemedText style={styles.requestButtonText} type="defaultSemiBold">
-                  Edit Listing
-                </ThemedText>
-              </Pressable>
-            </Link>
+            <Button label="Edit Listing" icon="pencil" onPress={() => router.push(`/edit-book/${book.id}`)} />
           ) : (
             <>
-              <Pressable
-                accessibilityRole="button"
-                disabled={buttonDisabled}
-                onPress={handleRequest}
-                style={[
-                  styles.requestButton,
-                  { backgroundColor: tint },
-                  buttonDisabled ? styles.requestButtonDisabled : undefined,
-                ]}>
-                <ThemedText style={styles.requestButtonText} type="defaultSemiBold">
-                  {buttonLabel}
-                </ThemedText>
-              </Pressable>
-
+              <Button label={buttonLabel} disabled={buttonDisabled} onPress={handleRequest} />
+              {requestError && <ThemedText style={styles.requestError}>{requestError}</ThemedText>}
               {hasOpenRequest && (
-                <Link href={`/request/${myRequest!.id}`} asChild>
-                  <Pressable style={styles.negotiateLink}>
-                    <ThemedText type="link">View request →</ThemedText>
-                  </Pressable>
-                </Link>
+                <Button label="View request" outline onPress={() => router.push(`/request/${myRequest!.id}`)} />
               )}
             </>
           )}
-        </ThemedView>
+        </View>
       </ScrollView>
     </>
   );
@@ -133,64 +150,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  content: {
-    flexGrow: 1,
+  content: { padding: 16, paddingBottom: 40, gap: 24 },
+  requestError: { color: '#E03131', fontSize: 14, textAlign: 'center' },
+  hero: { alignItems: 'center', gap: 6, paddingTop: 8 },
+  coverShadow: {
+    marginBottom: 12,
+    borderRadius: 18,
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
   },
-  coverContainer: {
-    alignItems: 'center',
-    paddingVertical: 24,
-  },
-  cover: {
-    width: 200,
-    height: 300,
-    borderRadius: 8,
-  },
-  coverPlaceholder: {
-    width: 200,
-    height: 300,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#687076',
-  },
-  info: {
-    paddingHorizontal: 20,
-    gap: 12,
-  },
-  author: {
-    opacity: 0.7,
-  },
-  metaRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  badge: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#687076',
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  description: {
-    lineHeight: 22,
-  },
-  owner: {
-    opacity: 0.8,
-  },
-  requestButton: {
-    marginTop: 12,
-    paddingVertical: 14,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  requestButtonDisabled: {
-    opacity: 0.5,
-  },
-  requestButtonText: {
-    color: '#fff',
-  },
-  negotiateLink: {
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
+  title: { textAlign: 'center', fontSize: 26, lineHeight: 32 },
+  author: { fontSize: 17, textAlign: 'center' },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8, marginTop: 10 },
+  chip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999 },
+  chipText: { fontSize: 13, lineHeight: 17, fontWeight: '600' },
+  description: { padding: 16, fontSize: 16, lineHeight: 23 },
+  ownerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 },
+  pressed: { opacity: 0.6 },
+  ownerText: { flex: 1, gap: 2 },
+  ownerName: { fontSize: 16, fontWeight: '600' },
+  ownerMeta: { fontSize: 13 },
+  actions: { gap: 10 },
 });

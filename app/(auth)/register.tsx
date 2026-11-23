@@ -75,6 +75,16 @@ export default function RegisterScreen() {
         </ThemedText>
       </Pressable>
 
+      <ThemedText style={styles.legal}>
+        By creating an account you agree to how we handle your data, described in our{' '}
+        <Link href="/privacy">
+          <ThemedText type="link" style={styles.legalLink}>
+            Privacy Policy
+          </ThemedText>
+        </Link>
+        .
+      </ThemedText>
+
       <Link href="/(auth)/login" style={styles.link}>
         <ThemedText type="link">Already have an account? Log in</ThemedText>
       </Link>
@@ -109,6 +119,16 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     color: '#fff',
+  },
+  legal: {
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'center',
+    color: '#687076',
+  },
+  legalLink: {
+    fontSize: 13,
+    lineHeight: 18,
   },
   link: {
     marginTop: 16,

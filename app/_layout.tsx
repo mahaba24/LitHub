@@ -24,6 +24,13 @@ function RootNavigator() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="book/[id]" options={{ headerBackTitle: 'Back' }} />
         <Stack.Screen name="request/[id]" options={{ headerBackTitle: 'Back' }} />
+        <Stack.Screen name="requests" options={{ headerBackTitle: 'Back' }} />
+        <Stack.Screen name="chats" options={{ headerBackTitle: 'Back' }} />
+        <Stack.Screen name="chat/[id]" options={{ headerBackTitle: 'Back' }} />
+        <Stack.Screen name="review/[id]" options={{ headerBackTitle: 'Back' }} />
+        <Stack.Screen name="user/[id]" options={{ headerBackTitle: 'Back' }} />
+        <Stack.Screen name="connections/[id]" options={{ headerBackTitle: 'Back' }} />
+        <Stack.Screen name="blocked-users" options={{ title: 'Blocked Users', headerBackTitle: 'Back' }} />
         <Stack.Screen name="add-book" options={{ presentation: 'modal' }} />
         <Stack.Screen name="edit-book/[id]" options={{ presentation: 'modal' }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
@@ -31,6 +38,8 @@ function RootNavigator() {
       <Stack.Protected guard={!user}>
         <Stack.Screen name="(auth)" options={{ headerShown: false }} />
       </Stack.Protected>
+      {/* Outside both guards: linked from Register (signed out) and Account (signed in). */}
+      <Stack.Screen name="privacy" options={{ title: 'Privacy Policy', headerBackTitle: 'Back' }} />
     </Stack>
   );
 }

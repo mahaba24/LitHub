@@ -7,6 +7,11 @@ export type ThemedViewProps = ViewProps & {
   darkColor?: string;
 };
 
+/**
+ * A view that paints the theme's *screen* background. Use it for full-screen
+ * surfaces only — as a wrapper inside a Card or list row it paints an opaque
+ * box over the card color. Use a plain View for layout inside cards.
+ */
 export function ThemedView({ style, lightColor, darkColor, ...otherProps }: ThemedViewProps) {
   const backgroundColor = useThemeColor({ light: lightColor, dark: darkColor }, 'background');
 
